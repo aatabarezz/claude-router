@@ -290,8 +290,8 @@ export function AdminPage() {
 
     {/* Deep Dive Audit Modal — outside overflow container so fixed positioning works */}
     {showAudit && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-6">
-          <div className="bg-background border border-border rounded-xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl">
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-6">
+          <div className="bg-white border border-gray-300 rounded-xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl">
             <div className="flex items-center justify-between p-4 border-b border-border">
               <div>
                 <h2 className="font-semibold">PII Audit — Deep Dive</h2>
@@ -345,10 +345,10 @@ export function AdminPage() {
                         {filteredEntities.map((e, i) => {
                           const em = TIER_META(e.tier)
                           return (
-                            <span key={i} className={`inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border ${em.bg} border-current/20 ${em.color}`}>
-                              <span className="font-mono font-bold">{e.tier}</span>
-                              <span className="text-muted-foreground">{e.type}</span>
-                              <span className="font-mono bg-black/20 px-1 rounded">{e.original.length > 20 ? e.original.slice(0, 17) + '…' : e.original}</span>
+                            <span key={i} className={`inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md bg-black text-white border border-black`}>
+                              <span className={`font-mono font-bold ${em.color}`}>{e.tier}</span>
+                              <span className="text-gray-300">{e.type}</span>
+                              <span className="font-mono text-white">{e.original.length > 20 ? e.original.slice(0, 17) + '…' : e.original}</span>
                             </span>
                           )
                         })}
