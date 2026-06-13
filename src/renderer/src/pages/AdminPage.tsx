@@ -4,7 +4,7 @@ import { api } from '../lib/ipc'
 interface DeptRow { id: string; name: string; prompt_count: number; avg_score: number; total_cost: number }
 interface CostComparison { opusOnly: number; sonnetOnly: number; sonnetOpus: number; haikuOnly: number; cascade: number; localFirst: number; localOnly: number }
 interface PiiStats { total_scanned: number; pii_detected: number; sent_to_cloud: number }
-interface Overview { depts: DeptRow[]; users: { count: number }; msgStats: { total: number; total_cost: number; avg_score: number; haiku_count: number; sonnet_count: number; opus_count: number; total_tokens: number } }
+interface Overview { depts: DeptRow[]; users: { count: number }; msgStats: { total: number; total_cost: number; avg_score: number; haiku_count: number; sonnet_count: number; opus_count: number; local_count: number; total_tokens: number } }
 
 const SEED_COMPANY_KEY = 'claude-router-seed-company-id'
 
@@ -144,8 +144,9 @@ export function AdminPage() {
             { name: 'Haiku', count: stats.haiku_count, color: 'bg-blue-400' },
             { name: 'Sonnet', count: stats.sonnet_count, color: 'bg-purple-400' },
             { name: 'Opus', count: stats.opus_count, color: 'bg-amber-400' },
+            { name: 'Local', count: stats.local_count ?? 0, color: 'bg-green-400' },
           ].map(({ name, count, color }) => {
-            const total = (stats.haiku_count + stats.sonnet_count + stats.opus_count) || 1
+            const total = (stats.haiku_count + stats.sonnet_count + stats.opus_count + (stats.local_count ?? 0)) || 1
             const pct = Math.round((count / total) * 100)
             return (
               <div key={name} className="flex items-center gap-3 text-sm">

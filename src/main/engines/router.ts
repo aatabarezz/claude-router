@@ -1,4 +1,4 @@
-export type ModelTarget = 'haiku' | 'sonnet' | 'opus'
+export type ModelTarget = 'haiku' | 'sonnet' | 'opus' | 'local'
 
 export interface RoutingResult {
   model: ModelTarget
@@ -32,8 +32,12 @@ export function routePromptRules(prompt: string, tokenCount: number): RoutingRes
   return { model: 'sonnet', confidence: 'low', reason: 'Ambiguous — needs classifier' }
 }
 
-export const MODEL_IDS: Record<ModelTarget, string> = {
+export const MODEL_IDS: Record<Exclude<ModelTarget, 'local'>, string> = {
   haiku: 'claude-haiku-4-5-20251001',
   sonnet: 'claude-sonnet-4-6',
   opus: 'claude-opus-4-8',
+}
+
+export function isLocalModel(model: ModelTarget): model is 'local' {
+  return model === 'local'
 }

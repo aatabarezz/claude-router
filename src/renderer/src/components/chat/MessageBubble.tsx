@@ -2,6 +2,7 @@ const MODEL_COLORS: Record<string, string> = {
   haiku: 'text-blue-400',
   sonnet: 'text-purple-400',
   opus: 'text-amber-400',
+  local: 'text-green-400',
 }
 
 interface Message {

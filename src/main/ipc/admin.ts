@@ -21,6 +21,7 @@ export function registerAdminHandlers(): void {
         SUM(CASE WHEN model_used = 'haiku' THEN 1 ELSE 0 END) as haiku_count,
         SUM(CASE WHEN model_used = 'sonnet' THEN 1 ELSE 0 END) as sonnet_count,
         SUM(CASE WHEN model_used = 'opus' THEN 1 ELSE 0 END) as opus_count,
+        SUM(CASE WHEN model_used = 'local' THEN 1 ELSE 0 END) as local_count,
         SUM(tokens_in + tokens_out) as total_tokens
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id

@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { randomUUID } from 'crypto'
 import { getDb } from '../db'
 import { scorePromptLocal } from '../engines/scorer'
-import { routePromptRules, MODEL_IDS } from '../engines/router'
+import { routePromptRules, MODEL_IDS, isLocalModel } from '../engines/router'
 import { maskPii, restorePii, hashMapping } from '../engines/pii'
 import type { SendMessagePayload, MessageResponse, ScorePayload } from '../../shared/types'
 
@@ -31,42 +31,55 @@ export function registerChatHandlers(): void {
       'INSERT INTO messages (id, conversation_id, role, content, local_quality_score, routing_reason, task_category) VALUES (?, ?, ?, ?, ?, ?, ?)'
     ).run(userMsgId, payload.conversationId, 'user', payload.content, score, routing.reason, taskCategory)
 
-    // Mask PII before sending to cloud
-    const { maskedText, entities, mapping } = maskPii(payload.content)
-    const piiMappingHash = hashMapping(mapping)
+    let assistantContent: string
+    let tokensIn = 0
+    let tokensOut = 0
+    let costUsd = 0
 
-    const client = new Anthropic({ apiKey: payload.apiKey })
-    const response = await client.messages.create({
-      model: MODEL_IDS[routing.model],
-      max_tokens: 4096,
-      messages: [{ role: 'user', content: maskedText }],
-    })
+    if (isLocalModel(routing.model)) {
+      // Local model path — call Ollama, no PII masking needed (stays on-prem)
+      const { store } = await import('../store')
+      const settings = store.get('globalSettings')
+      const ollamaUrl = `${settings.local_model_url}/api/generate`
+      const ollamaRes = await fetch(ollamaUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: settings.local_model_name, prompt: payload.content, stream: false }),
+      })
+      const ollamaJson = await ollamaRes.json() as { response?: string }
+      assistantContent = ollamaJson.response ?? '(no response from local model)'
+      costUsd = 0
+    } else {
+      // Cloud path — mask PII before sending
+      const { maskedText, entities, mapping } = maskPii(payload.content)
+      const piiMappingHash = hashMapping(mapping)
 
-    const firstBlock = response.content[0]
-    const rawAssistantContent = firstBlock.type === 'text' ? firstBlock.text : ''
-    // Restore any PII placeholders that may have leaked into the response
-    const assistantContent = restorePii(rawAssistantContent, mapping)
-    const costUsd = response.usage.input_tokens * 0.000001 + response.usage.output_tokens * 0.000003
+      const client = new Anthropic({ apiKey: payload.apiKey })
+      const response = await client.messages.create({
+        model: MODEL_IDS[routing.model],
+        max_tokens: 4096,
+        messages: [{ role: 'user', content: maskedText }],
+      })
+
+      const firstBlock = response.content[0]
+      const rawContent = firstBlock.type === 'text' ? firstBlock.text : ''
+      assistantContent = restorePii(rawContent, mapping)
+      tokensIn = response.usage.input_tokens
+      tokensOut = response.usage.output_tokens
+      costUsd = tokensIn * 0.000001 + tokensOut * 0.000003
+
+      // PII audit log
+      db.prepare(
+        'INSERT INTO pii_audit_log (id, message_id, user_id, department_id, routed_to, pii_entities_found, pii_sent_to_cloud, pii_mapping_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(randomUUID(), userMsgId, payload.userId, payload.departmentId,
+        routing.model, JSON.stringify(entities), 0, piiMappingHash)
+    }
 
     const assistantMsgId = randomUUID()
     db.prepare(
       'INSERT INTO messages (id, conversation_id, role, content, model_used, tokens_in, tokens_out, cost_usd, routing_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(assistantMsgId, payload.conversationId, 'assistant', assistantContent,
-      routing.model, response.usage.input_tokens, response.usage.output_tokens, costUsd, routing.reason)
-
-    // PII audit log: pii_sent_to_cloud=0 because we always send masked text
-    db.prepare(
-      'INSERT INTO pii_audit_log (id, message_id, user_id, department_id, routed_to, pii_entities_found, pii_sent_to_cloud, pii_mapping_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(
-      randomUUID(),
-      assistantMsgId,
-      payload.userId,
-      payload.departmentId,
-      routing.model,
-      JSON.stringify(entities),
-      0,
-      piiMappingHash
-    )
+      routing.model, tokensIn, tokensOut, costUsd, routing.reason)
 
     db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(payload.conversationId)
 
@@ -74,8 +87,8 @@ export function registerChatHandlers(): void {
       id: assistantMsgId,
       content: assistantContent,
       modelUsed: routing.model,
-      tokensIn: response.usage.input_tokens,
-      tokensOut: response.usage.output_tokens,
+      tokensIn,
+      tokensOut,
       costUsd,
       localQualityScore: score,
       routingReason: routing.reason,
