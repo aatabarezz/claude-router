@@ -9,7 +9,8 @@
     "preview": "electron-vite preview",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
-    "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false"
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
+    "rebuild": "electron-rebuild -f -w better-sqlite3"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",
@@ -24,6 +25,7 @@
     "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@electron-toolkit/utils": "^3.0.0",
+    "@electron/rebuild": "^3.7.2",
     "@tailwindcss/vite": "^4.0.0",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.9.3",
