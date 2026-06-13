@@ -3,6 +3,8 @@
   "include": ["src/renderer/src/**/*", "src/renderer/env.d.ts"],
   "compilerOptions": {
     "composite": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
     "baseUrl": ".",
     "paths": {
       "@renderer/*": ["src/renderer/src/*"]
