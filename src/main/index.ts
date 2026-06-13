@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { getDb } from './db'
+import { seedIfEmpty } from './db/seed'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -33,6 +34,7 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   getDb() // initialize DB on startup
+  seedIfEmpty()
   electronApp.setAppUserModelId('com.claude-router')
 
   app.on('browser-window-created', (_, window) => {
