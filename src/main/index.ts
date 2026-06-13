@@ -5,6 +5,7 @@ import { getDb } from './db'
 import { seedIfEmpty } from './db/seed'
 import { registerChatHandlers } from './ipc/chat'
 import { registerConversationHandlers } from './ipc/conversations'
+import { registerSettingsHandlers } from './ipc/settings'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -39,6 +40,7 @@ app.whenReady().then(() => {
   seedIfEmpty()
   registerChatHandlers()
   registerConversationHandlers()
+  registerSettingsHandlers()
   electronApp.setAppUserModelId('com.claude-router')
 
   app.on('browser-window-created', (_, window) => {

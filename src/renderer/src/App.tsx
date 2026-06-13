@@ -1,14 +1,19 @@
-import React from 'react'
+import { useState } from 'react'
+import { TabBar } from './components/layout/TabBar'
+import { ChatPage } from './pages/ChatPage'
+import { StatsPage } from './pages/StatsPage'
+import { AdminPage } from './pages/AdminPage'
 
-function App(): React.JSX.Element {
+export default function App() {
+  const [tab, setTab] = useState('chat')
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-950 text-white">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold tracking-tight">Claude Router</h1>
-        <p className="mt-2 text-gray-400">Intelligent prompt routing for Claude models</p>
+    <div className="flex flex-col h-screen bg-background text-foreground">
+      <TabBar active={tab} onChange={setTab} />
+      <div className="flex-1 overflow-hidden">
+        {tab === 'chat' && <ChatPage />}
+        {tab === 'stats' && <StatsPage />}
+        {tab === 'admin' && <AdminPage />}
       </div>
     </div>
   )
 }
-
-export default App
