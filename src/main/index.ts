@@ -3,6 +3,8 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { getDb } from './db'
 import { seedIfEmpty } from './db/seed'
+import { registerChatHandlers } from './ipc/chat'
+import { registerConversationHandlers } from './ipc/conversations'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -35,6 +37,8 @@ function createWindow(): void {
 app.whenReady().then(() => {
   getDb() // initialize DB on startup
   seedIfEmpty()
+  registerChatHandlers()
+  registerConversationHandlers()
   electronApp.setAppUserModelId('com.claude-router')
 
   app.on('browser-window-created', (_, window) => {
