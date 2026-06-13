@@ -74,6 +74,7 @@ export function AdminPage() {
   const stats = overview?.msgStats
 
   return (
+    <>
     <div className="p-6 overflow-y-auto h-full space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Company AI Dashboard</h1>
@@ -285,8 +286,10 @@ export function AdminPage() {
         </div>
       </div>
 
-      {/* Deep Dive Audit Modal */}
-      {showAudit && (
+    </div>
+
+    {/* Deep Dive Audit Modal — outside overflow container so fixed positioning works */}
+    {showAudit && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-6">
           <div className="bg-background border border-border rounded-xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl">
             <div className="flex items-center justify-between p-4 border-b border-border">
@@ -360,6 +363,7 @@ export function AdminPage() {
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
+
