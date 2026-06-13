@@ -8,6 +8,7 @@ import { registerConversationHandlers } from './ipc/conversations'
 import { registerSettingsHandlers } from './ipc/settings'
 import { registerAdminHandlers } from './ipc/admin'
 import { registerStatsHandlers } from './ipc/stats'
+import { registerExportHandlers } from './ipc/export'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -45,6 +46,7 @@ app.whenReady().then(() => {
   registerSettingsHandlers()
   registerAdminHandlers()
   registerStatsHandlers()
+  registerExportHandlers()
   electronApp.setAppUserModelId('com.claude-router')
 
   app.on('browser-window-created', (_, window) => {

@@ -26,6 +26,10 @@ export function ChatPage() {
   const [loading, setLoading] = useState(false)
   const [apiKey, setApiKey] = useState('')
   const [showKeyInput, setShowKeyInput] = useState(false)
+  const [clarifyQuestions, setClarifyQuestions] = useState<string[]>([])
+  const [clarifyAnswers, setClarifyAnswers] = useState<string[]>([])
+  const [showClarify, setShowClarify] = useState(false)
+  const [clarifyLoading, setClarifyLoading] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const scoreTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -70,10 +74,35 @@ export function ChatPage() {
     setMessages([])
   }
 
+  const handleSendWithClarification = async () => {
+    const enrichedPrompt = [
+      input,
+      ...clarifyQuestions.map((q, i) => `${q}\n${clarifyAnswers[i] ?? ''}`),
+    ].join('\n\n')
+    setInput(enrichedPrompt)
+    setClarifyQuestions([])
+    setClarifyAnswers([])
+    setShowClarify(false)
+    const rescored = await api.scorePrompt(enrichedPrompt) as { score: number }
+    setScore(rescored.score)
+    await handleSend()
+  }
+
   const handleSend = async () => {
     if (!input.trim() || !activeConvId || !apiKey) {
       if (!apiKey) setShowKeyInput(true)
       return
+    }
+    if (score < 40 && !showClarify && !clarifyQuestions.length) {
+      setClarifyLoading(true)
+      const result = await api.clarify(input, apiKey) as { questions: string[] }
+      setClarifyLoading(false)
+      if (result.questions.length > 0) {
+        setClarifyQuestions(result.questions)
+        setClarifyAnswers(result.questions.map(() => ''))
+        setShowClarify(true)
+        return
+      }
     }
     setLoading(true)
     const content = input
@@ -161,6 +190,40 @@ export function ChatPage() {
             </div>
             <div className="border-t border-border p-4 flex flex-col gap-2">
               <ScoreBar score={score} />
+              {clarifyLoading && (
+                <p className="text-xs text-muted-foreground">Analyzing prompt...</p>
+              )}
+              {showClarify && (
+                <div className="border border-amber-500/30 bg-amber-500/5 rounded-lg p-3 space-y-3">
+                  <p className="text-xs text-amber-400 font-medium">Your prompt could be more specific. Answer these to improve it:</p>
+                  {clarifyQuestions.map((q, i) => (
+                    <div key={i} className="space-y-1">
+                      <p className="text-xs text-foreground">{q}</p>
+                      <input
+                        type="text"
+                        placeholder="Your answer..."
+                        value={clarifyAnswers[i] ?? ''}
+                        onChange={(e) => {
+                          const next = [...clarifyAnswers]
+                          next[i] = e.target.value
+                          setClarifyAnswers(next)
+                        }}
+                        className="w-full text-sm border border-border rounded px-2 py-1 bg-background"
+                      />
+                    </div>
+                  ))}
+                  <div className="flex gap-2">
+                    <button onClick={() => void handleSendWithClarification()}
+                      className="text-xs px-3 py-1 bg-primary text-primary-foreground rounded-md hover:bg-primary/90">
+                      Send with answers
+                    </button>
+                    <button onClick={() => { setShowClarify(false); void handleSend() }}
+                      className="text-xs px-3 py-1 border border-border rounded-md hover:bg-muted">
+                      Send anyway
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="flex gap-2">
                 <textarea
                   value={input}

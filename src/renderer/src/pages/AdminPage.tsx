@@ -48,14 +48,25 @@ export function AdminPage() {
     <div className="p-6 overflow-y-auto h-full space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Company AI Dashboard</h1>
-        <select
-          value={period}
-          onChange={(e) => setPeriod(e.target.value)}
-          className="text-sm border border-border rounded px-2 py-1 bg-background"
-        >
-          <option value="week">This Week</option>
-          <option value="month">This Month</option>
-        </select>
+        <div className="flex gap-2 items-center">
+          <select
+            value={period}
+            onChange={(e) => setPeriod(e.target.value)}
+            className="text-sm border border-border rounded px-2 py-1 bg-background"
+          >
+            <option value="week">This Week</option>
+            <option value="month">This Month</option>
+          </select>
+          <button
+            onClick={() => void api.exportComplianceReport(companyId).then((r) => {
+              const res = r as { success: boolean; filePath?: string }
+              if (res.success) alert(`Saved to ${res.filePath}`)
+            })}
+            className="text-sm border border-border rounded px-3 py-1 hover:bg-muted"
+          >
+            Export Compliance Report
+          </button>
+        </div>
       </div>
 
       {/* KPI row */}

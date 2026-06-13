@@ -12,6 +12,11 @@ export function registerChatHandlers(): void {
     return scorePromptLocal(payload.prompt)
   })
 
+  ipcMain.handle('chat:clarify', async (_e, payload: { prompt: string; apiKey: string }) => {
+    const { generateClarifyingQuestions } = await import('../engines/clarifier')
+    return generateClarifyingQuestions(payload.prompt, payload.apiKey)
+  })
+
   ipcMain.handle('chat:send', async (_e, payload: SendMessagePayload): Promise<MessageResponse> => {
     const db = getDb()
     const tokenCount = payload.content.split(/\s+/).length

@@ -18,7 +18,9 @@
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "electron-store": "^10.0.0",
+    "exceljs": "^4.4.0",
     "lucide-react": "^0.453.0",
+    "recharts": "^3.8.1",
     "tailwind-merge": "^2.5.4"
   },
   "devDependencies": {

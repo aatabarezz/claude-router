@@ -15,4 +15,6 @@ export const api = {
   getCostComparison: (companyId: string) => ipc.invoke('admin:costComparison', companyId),
   getDeptBreakdown: (companyId: string) => ipc.invoke('admin:deptBreakdown', companyId),
   getSeedContext: () => ipc.invoke('settings:getSeedContext'),
+  clarify: (prompt: string, apiKey: string) => ipc.invoke('chat:clarify', { prompt, apiKey }),
+  exportComplianceReport: (companyId: string) => ipc.invoke('export:complianceReport', companyId),
 }
