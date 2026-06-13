@@ -7,6 +7,49 @@ import { routePromptRules, MODEL_IDS, isLocalModel } from '../engines/router'
 import { maskPii, restorePii, hashMapping } from '../engines/pii'
 import type { SendMessagePayload, MessageResponse, ScorePayload } from '../../shared/types'
 
+const SYSTEM_PROMPT = `You are a helpful AI assistant running inside Claude Router, a private enterprise desktop app.
+You do NOT have internet access by default. If the web_search tool is available and enabled, you may use it to look up current information.
+If web_search is NOT listed in your tools, clearly tell the user you cannot search the web and offer to help from your training knowledge.
+Be concise, accurate, and direct. You have full memory of the current conversation.`
+
+const WEB_SEARCH_TOOL: Anthropic.Tool = {
+  name: 'web_search',
+  description: 'Search the web for current information, news, people, or facts. Use when the user asks about something that requires up-to-date information.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      query: { type: 'string', description: 'The search query' },
+    },
+    required: ['query'],
+  },
+}
+
+async function runBraveSearch(query: string, apiKey: string): Promise<string> {
+  try {
+    const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=5&text_decorations=false`
+    const res = await fetch(url, {
+      headers: { 'Accept': 'application/json', 'X-Subscription-Token': apiKey },
+    })
+    if (!res.ok) return `Search failed: HTTP ${res.status}`
+    const data = await res.json() as {
+      web?: { results?: Array<{ title: string; description: string; url: string }> }
+    }
+    const results = data.web?.results ?? []
+    if (results.length === 0) return 'No results found.'
+    return results
+      .map((r, i) => `${i + 1}. **${r.title}**\n   ${r.description}\n   ${r.url}`)
+      .join('\n\n')
+  } catch (e) {
+    return `Search error: ${String(e)}`
+  }
+}
+
+const PRICING: Record<string, { in: number; out: number }> = {
+  'claude-haiku-4-5-20251001': { in: 0.0000008, out: 0.000004 },
+  'claude-sonnet-4-6':         { in: 0.000003,  out: 0.000015 },
+  'claude-opus-4-8':           { in: 0.000015,  out: 0.000075 },
+}
+
 export function registerChatHandlers(): void {
   ipcMain.handle('chat:score', (_e, payload: ScorePayload) => {
     return scorePromptLocal(payload.prompt)
@@ -20,16 +63,22 @@ export function registerChatHandlers(): void {
   ipcMain.handle('chat:send', async (_e, payload: SendMessagePayload): Promise<MessageResponse> => {
     const db = getDb()
     const tokenCount = payload.content.split(/\s+/).length
-
     const { score } = scorePromptLocal(payload.content)
     const routing = routePromptRules(payload.content, tokenCount)
     const taskCategory = tokenCount < 80 ? 'simple' : tokenCount < 400 ? 'moderate' : 'complex'
 
-    // Store original content in our DB (before masking)
+    // Persist user message
     const userMsgId = randomUUID()
     db.prepare(
       'INSERT INTO messages (id, conversation_id, role, content, local_quality_score, routing_reason, task_category) VALUES (?, ?, ?, ?, ?, ?, ?)'
     ).run(userMsgId, payload.conversationId, 'user', payload.content, score, routing.reason, taskCategory)
+
+    // Load conversation history
+    const history = db.prepare(
+      `SELECT role, content FROM messages
+       WHERE conversation_id = ? AND id != ?
+       ORDER BY created_at ASC`
+    ).all(payload.conversationId, userMsgId) as Array<{ role: string; content: string }>
 
     let assistantContent: string
     let tokensIn = 0
@@ -37,36 +86,97 @@ export function registerChatHandlers(): void {
     let costUsd = 0
 
     if (isLocalModel(routing.model)) {
-      // Local model path — call Ollama, no PII masking needed (stays on-prem)
       const { store } = await import('../store')
       const settings = store.get('globalSettings')
+      const historyText = history
+        .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+        .join('\n')
+      const fullPrompt = historyText
+        ? `${historyText}\nUser: ${payload.content}\nAssistant:`
+        : payload.content
+
       const ollamaUrl = `${settings.local_model_url}/api/generate`
       const ollamaRes = await fetch(ollamaUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: settings.local_model_name, prompt: payload.content, stream: false }),
+        body: JSON.stringify({ model: settings.local_model_name, prompt: fullPrompt, stream: false }),
       })
       const ollamaJson = await ollamaRes.json() as { response?: string }
       assistantContent = ollamaJson.response ?? '(no response from local model)'
-      costUsd = 0
     } else {
-      // Cloud path — mask PII before sending
+      // Cloud path — mask PII in current message
       const { maskedText, entities, mapping } = maskPii(payload.content)
       const piiMappingHash = hashMapping(mapping)
 
+      const apiMessages: Array<Anthropic.MessageParam> = [
+        ...history.map((m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+        })),
+        { role: 'user' as const, content: maskedText },
+      ]
+
       const client = new Anthropic({ apiKey: payload.apiKey })
-      const response = await client.messages.create({
-        model: MODEL_IDS[routing.model],
+      const modelId = MODEL_IDS[routing.model]
+      const tools: Anthropic.Tool[] = payload.enableWebSearch ? [WEB_SEARCH_TOOL] : []
+
+      // Agentic loop — keeps going while Claude wants to call tools
+      let response = await client.messages.create({
+        model: modelId,
         max_tokens: 4096,
-        messages: [{ role: 'user', content: maskedText }],
+        system: SYSTEM_PROMPT,
+        messages: apiMessages,
+        ...(tools.length > 0 ? { tools } : {}),
       })
 
-      const firstBlock = response.content[0]
-      const rawContent = firstBlock.type === 'text' ? firstBlock.text : ''
+      tokensIn += response.usage.input_tokens
+      tokensOut += response.usage.output_tokens
+
+      while (response.stop_reason === 'tool_use') {
+        const toolUseBlocks = response.content.filter(
+          (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use'
+        )
+
+        // Append assistant turn with tool calls
+        apiMessages.push({ role: 'assistant', content: response.content })
+
+        // Execute each tool and collect results
+        const toolResults: Anthropic.ToolResultBlockParam[] = []
+        for (const toolCall of toolUseBlocks) {
+          let toolOutput = ''
+          if (toolCall.name === 'web_search' && payload.braveApiKey) {
+            const input = toolCall.input as { query: string }
+            toolOutput = await runBraveSearch(input.query, payload.braveApiKey)
+          } else if (toolCall.name === 'web_search') {
+            toolOutput = 'Web search is enabled but no Brave API key is configured. Go to Setup → Tool Use to add one.'
+          } else {
+            toolOutput = `Unknown tool: ${toolCall.name}`
+          }
+          toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: toolOutput })
+        }
+
+        // Append tool results turn
+        apiMessages.push({ role: 'user', content: toolResults })
+
+        // Continue conversation
+        response = await client.messages.create({
+          model: modelId,
+          max_tokens: 4096,
+          system: SYSTEM_PROMPT,
+          messages: apiMessages,
+          tools,
+        })
+        tokensIn += response.usage.input_tokens
+        tokensOut += response.usage.output_tokens
+      }
+
+      // Extract final text
+      const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text')
+      const rawContent = textBlock?.text ?? ''
       assistantContent = restorePii(rawContent, mapping)
-      tokensIn = response.usage.input_tokens
-      tokensOut = response.usage.output_tokens
-      costUsd = tokensIn * 0.000001 + tokensOut * 0.000003
+
+      const p = PRICING[modelId] ?? { in: 0.000003, out: 0.000015 }
+      costUsd = tokensIn * p.in + tokensOut * p.out
 
       // PII audit log
       db.prepare(

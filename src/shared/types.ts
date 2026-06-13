@@ -4,6 +4,8 @@ export interface SendMessagePayload {
   departmentId: string
   content: string
   apiKey: string
+  enableWebSearch?: boolean
+  braveApiKey?: string
 }
 
 export interface MessageResponse {

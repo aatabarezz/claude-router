@@ -1,6 +1,7 @@
-import { BarChart2, MessageSquare, Settings } from 'lucide-react'
+import { BarChart2, MessageSquare, Settings, SlidersHorizontal } from 'lucide-react'
 
 const tabs = [
+  { id: 'settings', label: 'Setup', icon: SlidersHorizontal },
   { id: 'admin', label: 'Admin', icon: Settings },
   { id: 'stats', label: 'My Stats', icon: BarChart2 },
   { id: 'chat', label: 'Chat', icon: MessageSquare },
