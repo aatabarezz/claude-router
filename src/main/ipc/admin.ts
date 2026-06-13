@@ -53,17 +53,24 @@ export function registerAdminHandlers(): void {
       WHERE d.company_id = ? AND m.role = 'assistant'
     `).all(companyId) as Array<{ tokens_in: number; tokens_out: number; model_used: string; cost_usd: number }>
 
-    const opusOnlyCost = rows.reduce((s, r) => s + r.tokens_in * 0.000015 + r.tokens_out * 0.000075, 0)
-    const actualCost = rows.reduce((s, r) => s + r.cost_usd, 0)
-    const localFirstEstimate = actualCost * 0.1
+    // Pricing per token (USD): input / output
+    const OPUS   = { in: 0.000015, out: 0.000075 }
+    const SONNET = { in: 0.000003, out: 0.000015 }
+    const HAIKU  = { in: 0.0000008, out: 0.000004 }
 
-    return {
-      opusOnlyCost,
-      actualCost,
-      localFirstEstimate,
-      savedVsOpus: opusOnlyCost - actualCost,
-      savedVsLocalFirst: actualCost - localFirstEstimate,
-    }
+    const cost = (p: typeof OPUS, r: { tokens_in: number; tokens_out: number }) =>
+      r.tokens_in * p.in + r.tokens_out * p.out
+
+    const opusOnly   = rows.reduce((s, r) => s + cost(OPUS, r), 0)
+    const sonnetOnly = rows.reduce((s, r) => s + cost(SONNET, r), 0)
+    const sonnetOpus = rows.reduce((s, r) => s + cost(r.model_used === 'opus' ? OPUS : SONNET, r), 0)
+    const haikuOnly  = rows.reduce((s, r) => s + cost(HAIKU, r), 0)
+    const cascade    = rows.reduce((s, r) => s + r.cost_usd, 0) // actual recorded cost
+    // Local-first: assume 70% handled by local model (free), 30% escalates to cascade
+    const localFirst = cascade * 0.30
+    const localOnly  = 0
+
+    return { opusOnly, sonnetOnly, sonnetOpus, haikuOnly, cascade, localFirst, localOnly }
   })
 
   ipcMain.handle('admin:deptBreakdown', (_e, companyId: string) => {

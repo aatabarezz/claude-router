@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../lib/ipc'
 
 interface DeptRow { id: string; name: string; prompt_count: number; avg_score: number; total_cost: number }
-interface CostComparison { opusOnlyCost: number; actualCost: number; localFirstEstimate: number; savedVsOpus: number; savedVsLocalFirst: number }
+interface CostComparison { opusOnly: number; sonnetOnly: number; sonnetOpus: number; haikuOnly: number; cascade: number; localFirst: number; localOnly: number }
 interface PiiStats { total_scanned: number; pii_detected: number; sent_to_cloud: number }
 interface Overview { depts: DeptRow[]; users: { count: number }; msgStats: { total: number; total_cost: number; avg_score: number; haiku_count: number; sonnet_count: number; opus_count: number; total_tokens: number } }
 
@@ -79,33 +79,61 @@ export function AdminPage() {
 
       {/* Cost Intelligence */}
       <div className="border border-border rounded-lg p-4 space-y-3">
-        <h2 className="text-sm font-semibold">Cost Intelligence</h2>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-muted-foreground border-b border-border">
-              <th className="pb-2 font-medium">Scenario</th>
-              <th className="pb-2 font-medium text-right">Estimated Cost</th>
-              <th className="pb-2 font-medium text-right">Saved</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            <tr>
-              <td className="py-2">Opus-Only (baseline)</td>
-              <td className="py-2 text-right font-mono">${fmt(cost?.opusOnlyCost)}</td>
-              <td className="py-2 text-right text-muted-foreground">—</td>
-            </tr>
-            <tr className="font-medium">
-              <td className="py-2">Cascade (actual)</td>
-              <td className="py-2 text-right font-mono">${fmt(cost?.actualCost)}</td>
-              <td className="py-2 text-right text-green-500">+${fmt(cost?.savedVsOpus)}</td>
-            </tr>
-            <tr>
-              <td className="py-2 text-muted-foreground">Local-First (estimate)</td>
-              <td className="py-2 text-right font-mono text-muted-foreground">${fmt(cost?.localFirstEstimate)}</td>
-              <td className="py-2 text-right text-green-400">+${fmt(cost?.savedVsLocalFirst)}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Cost Intelligence</h2>
+          <span className="text-xs text-muted-foreground">Based on same token volume · most expensive → cheapest</span>
+        </div>
+        {(() => {
+          const baseline = cost?.opusOnly ?? 0
+          const scenarios: Array<{ label: string; sublabel: string; value: number; actual?: boolean; local?: boolean }> = [
+            { label: 'Opus Only',              sublabel: 'All prompts → Opus',                        value: cost?.opusOnly   ?? 0 },
+            { label: 'Sonnet + Opus',          sublabel: 'Complex → Opus, rest → Sonnet',             value: cost?.sonnetOpus ?? 0 },
+            { label: 'Sonnet Only',            sublabel: 'All prompts → Sonnet',                      value: cost?.sonnetOnly ?? 0 },
+            { label: 'Haiku + Sonnet + Opus',  sublabel: 'Smart cascade (actual)',                    value: cost?.cascade    ?? 0, actual: true },
+            { label: 'Haiku Only',             sublabel: 'All prompts → Haiku',                       value: cost?.haikuOnly  ?? 0 },
+            { label: 'Local-First → Cascade',  sublabel: '70% local, 30% escalate to cascade',        value: cost?.localFirst ?? 0, local: true },
+            { label: 'Local Only',             sublabel: 'All prompts → local model (Ollama)',         value: 0,                     local: true },
+          ]
+          return (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-muted-foreground border-b border-border text-xs">
+                  <th className="pb-2 font-medium">Scenario</th>
+                  <th className="pb-2 font-medium text-right">Est. Cost</th>
+                  <th className="pb-2 font-medium text-right">vs Opus-Only</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {scenarios.map(({ label, sublabel, value, actual, local }) => {
+                  const saved = baseline - value
+                  const isBaseline = label === 'Opus Only'
+                  return (
+                    <tr key={label} className={actual ? 'bg-primary/5' : ''}>
+                      <td className="py-2 pr-4">
+                        <div className={`font-medium ${local ? 'text-green-400' : ''} ${actual ? 'text-primary' : ''}`}>
+                          {label}
+                          {actual && <span className="ml-2 text-xs bg-primary/20 text-primary rounded px-1">current</span>}
+                        </div>
+                        <div className="text-xs text-muted-foreground">{sublabel}</div>
+                      </td>
+                      <td className="py-2 text-right font-mono">
+                        {local && value === 0 ? <span className="text-green-400">$0.00</span> : `$${fmt(value)}`}
+                      </td>
+                      <td className="py-2 text-right">
+                        {isBaseline
+                          ? <span className="text-muted-foreground text-xs">baseline</span>
+                          : <span className={saved >= 0 ? 'text-green-400' : 'text-red-400'}>
+                              {saved >= 0 ? '+' : ''}${fmt(saved)}
+                            </span>
+                        }
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )
+        })()}
       </div>
 
       {/* Model Distribution */}
