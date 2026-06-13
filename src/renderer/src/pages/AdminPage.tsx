@@ -3,7 +3,33 @@ import { api } from '../lib/ipc'
 
 interface DeptRow { id: string; name: string; prompt_count: number; avg_score: number; total_cost: number }
 interface CostComparison { opusOnly: number; sonnetOnly: number; sonnetOpus: number; haikuOnly: number; cascade: number; localFirst: number; localOnly: number }
-interface PiiStats { total_scanned: number; pii_detected: number; sent_to_cloud: number }
+interface PiiStats {
+  total_scanned: number
+  pii_detected: number
+  sent_to_cloud: number
+  tiers: { P0: number; P1: number; P2: number; P3: number }
+}
+
+interface AuditEntity { type: string; tier: string; original: string; placeholder: string }
+interface AuditRow {
+  id: string; message_id: string; conversation_id: string
+  routed_to: string; detected_at: string; pii_sent_to_cloud: number
+  user_name: string; dept_name: string
+  entities: AuditEntity[]
+}
+
+const TIER_META_MAP = {
+  P0: { label: 'P0 — Public',                    color: 'text-slate-400',  bg: 'bg-slate-400/10' },
+  P1: { label: 'P1 — Internal Personal Data',    color: 'text-yellow-400', bg: 'bg-yellow-400/10' },
+  P2: { label: 'P2 — Confidential Personal Data',color: 'text-orange-400', bg: 'bg-orange-400/10' },
+  P3: { label: 'P3 — Restricted / Sensitive',    color: 'text-red-500',    bg: 'bg-red-500/10' },
+} as const
+
+type TierMeta = { label: string; color: string; bg: string }
+const FALLBACK_TIER: TierMeta = { label: 'P1 — Internal Personal Data', color: 'text-yellow-400', bg: 'bg-yellow-400/10' }
+function TIER_META(tier: string): TierMeta {
+  return (TIER_META_MAP as unknown as Record<string, TierMeta>)[tier] ?? FALLBACK_TIER
+}
 interface Overview { depts: DeptRow[]; users: { count: number }; msgStats: { total: number; total_cost: number; avg_score: number; haiku_count: number; sonnet_count: number; opus_count: number; local_count: number; total_tokens: number } }
 
 const SEED_COMPANY_KEY = 'claude-router-seed-company-id'
@@ -29,6 +55,9 @@ export function AdminPage() {
   const [cost, setCost] = useState<CostComparison | null>(null)
   const [pii, setPii] = useState<PiiStats | null>(null)
   const [depts, setDepts] = useState<DeptRow[]>([])
+  const [auditRows, setAuditRows] = useState<AuditRow[]>([])
+  const [showAudit, setShowAudit] = useState(false)
+  const [auditTierFilter, setAuditTierFilter] = useState<string>('ALL')
 
   const companyId = localStorage.getItem(SEED_COMPANY_KEY) ?? ''
 
@@ -189,32 +218,148 @@ export function AdminPage() {
       </div>
 
       {/* PII Compliance */}
-      <div className="border border-border rounded-lg p-4 space-y-3">
+      <div className="border border-border rounded-lg p-4 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">PII Compliance</h2>
-          {pii?.sent_to_cloud === 0 && (
-            <span className="text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded-full px-2 py-0.5">
-              ✓ Zero PII to Cloud
-            </span>
-          )}
+          <div className="flex items-center gap-3">
+            <h2 className="text-sm font-semibold">PII Compliance</h2>
+            {(pii?.sent_to_cloud ?? 0) === 0 && (
+              <span className="text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded-full px-2 py-0.5">
+                ✓ Zero PII to Cloud
+              </span>
+            )}
+          </div>
+          <button
+            onClick={() => {
+              void api.getPiiAuditDetail(companyId).then((r) => {
+                setAuditRows(r as AuditRow[])
+                setShowAudit(true)
+              })
+            }}
+            className="text-xs px-3 py-1.5 border border-border rounded-md hover:bg-muted transition-colors font-medium"
+          >
+            Deep Dive Audit →
+          </button>
         </div>
-        <div className="grid grid-cols-3 gap-4 text-sm">
+
+        {/* Summary row */}
+        <div className="grid grid-cols-3 gap-4 text-sm pb-3 border-b border-border">
           <div>
-            <div className="text-muted-foreground text-xs">Scanned</div>
-            <div className="text-lg font-semibold">{pii?.total_scanned ?? '—'}</div>
+            <div className="text-muted-foreground text-xs">Messages Scanned</div>
+            <div className="text-xl font-semibold">{pii?.total_scanned ?? '—'}</div>
           </div>
           <div>
             <div className="text-muted-foreground text-xs">PII Detected</div>
-            <div className="text-lg font-semibold">{pii?.pii_detected ?? '—'}</div>
+            <div className="text-xl font-semibold">{pii?.pii_detected ?? '—'}</div>
           </div>
           <div>
-            <div className="text-muted-foreground text-xs">Sent to Cloud</div>
-            <div className={`text-lg font-semibold ${(pii?.sent_to_cloud ?? 0) > 0 ? 'text-red-500' : 'text-green-400'}`}>
+            <div className="text-muted-foreground text-xs">Raw PII to Cloud</div>
+            <div className={`text-xl font-semibold ${(pii?.sent_to_cloud ?? 0) > 0 ? 'text-red-500' : 'text-green-400'}`}>
               {pii?.sent_to_cloud ?? 0}
             </div>
           </div>
         </div>
+
+        {/* Tier breakdown */}
+        <div className="space-y-2">
+          <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Detections by Tier</div>
+          {(['P3', 'P2', 'P1', 'P0'] as const).map((tier) => {
+            const count = pii?.tiers?.[tier] ?? 0
+            const meta = TIER_META(tier)
+            const max = Math.max(...(['P0','P1','P2','P3'].map(t => pii?.tiers?.[t as 'P0'] ?? 0)), 1)
+            return (
+              <div key={tier} className="flex items-center gap-3 text-sm">
+                <div className={`text-xs font-mono font-bold w-6 ${meta.color}`}>{tier}</div>
+                <div className={`text-xs flex-1 truncate text-muted-foreground`}>{meta.label.split(' — ')[1]}</div>
+                <div className="w-32 h-2 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${meta.bg.replace('/10', '/60')}`}
+                    style={{ width: `${(count / max) * 100}%` }}
+                  />
+                </div>
+                <div className={`text-sm font-semibold w-8 text-right ${count > 0 ? meta.color : 'text-muted-foreground'}`}>
+                  {count}
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
+
+      {/* Deep Dive Audit Modal */}
+      {showAudit && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-6">
+          <div className="bg-background border border-border rounded-xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl">
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <div>
+                <h2 className="font-semibold">PII Audit — Deep Dive</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">{auditRows.length} messages with PII detections · conversation IDs for lookup</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={auditTierFilter}
+                  onChange={(e) => setAuditTierFilter(e.target.value)}
+                  className="text-xs border border-border rounded px-2 py-1 bg-background"
+                >
+                  <option value="ALL">All Tiers</option>
+                  <option value="P3">P3 — Restricted</option>
+                  <option value="P2">P2 — Confidential</option>
+                  <option value="P1">P1 — Internal</option>
+                  <option value="P0">P0 — Public</option>
+                </select>
+                <button onClick={() => setShowAudit(false)} className="text-muted-foreground hover:text-foreground px-2 py-1 text-lg leading-none">✕</button>
+              </div>
+            </div>
+
+            <div className="overflow-y-auto flex-1 divide-y divide-border">
+              {auditRows
+                .filter(row => auditTierFilter === 'ALL' || row.entities.some(e => e.tier === auditTierFilter))
+                .map((row) => {
+                  const filteredEntities = auditTierFilter === 'ALL'
+                    ? row.entities
+                    : row.entities.filter(e => e.tier === auditTierFilter)
+                  const highestTier = (['P3','P2','P1','P0'] as const).find(t => row.entities.some(e => e.tier === t)) ?? 'P0'
+                  const meta = TIER_META(highestTier)
+                  return (
+                    <div key={row.id} className="p-4 space-y-2 hover:bg-muted/30">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>{row.dept_name}</span>
+                            <span>·</span>
+                            <span>{row.user_name}</span>
+                            <span>·</span>
+                            <span>{new Date(row.detected_at).toLocaleString()}</span>
+                            <span>·</span>
+                            <span className="font-mono">routed → {row.routed_to}</span>
+                          </div>
+                          <div className="text-xs font-mono text-muted-foreground">
+                            conv: <span className="select-all text-foreground">{row.conversation_id}</span>
+                          </div>
+                        </div>
+                        <span className={`text-xs font-bold font-mono shrink-0 ${meta.color}`}>{highestTier}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {filteredEntities.map((e, i) => {
+                          const em = TIER_META(e.tier)
+                          return (
+                            <span key={i} className={`inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border ${em.bg} border-current/20 ${em.color}`}>
+                              <span className="font-mono font-bold">{e.tier}</span>
+                              <span className="text-muted-foreground">{e.type}</span>
+                              <span className="font-mono bg-black/20 px-1 rounded">{e.original.length > 20 ? e.original.slice(0, 17) + '…' : e.original}</span>
+                            </span>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              {auditRows.filter(row => auditTierFilter === 'ALL' || row.entities.some(e => e.tier === auditTierFilter)).length === 0 && (
+                <div className="p-8 text-center text-muted-foreground text-sm">No PII detections found for this tier filter.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

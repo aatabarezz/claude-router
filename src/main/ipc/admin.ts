@@ -34,7 +34,8 @@ export function registerAdminHandlers(): void {
 
   ipcMain.handle('admin:piiStats', (_e, companyId: string) => {
     const db = getDb()
-    return db.prepare(`
+
+    const summary = db.prepare(`
       SELECT
         COUNT(*) as total_scanned,
         SUM(CASE WHEN json_array_length(pii_entities_found) > 0 THEN 1 ELSE 0 END) as pii_detected,
@@ -42,7 +43,53 @@ export function registerAdminHandlers(): void {
       FROM pii_audit_log pal
       JOIN departments d ON pal.department_id = d.id
       WHERE d.company_id = ?
-    `).get(companyId)
+    `).get(companyId) as { total_scanned: number; pii_detected: number; sent_to_cloud: number }
+
+    // Derive tier counts by parsing stored entity JSON
+    const rows = db.prepare(`
+      SELECT pii_entities_found FROM pii_audit_log pal
+      JOIN departments d ON pal.department_id = d.id
+      WHERE d.company_id = ? AND json_array_length(pii_entities_found) > 0
+    `).all(companyId) as Array<{ pii_entities_found: string }>
+
+    const tiers: Record<string, number> = { P0: 0, P1: 0, P2: 0, P3: 0 }
+    for (const row of rows) {
+      const entities = JSON.parse(row.pii_entities_found) as Array<{ tier?: string }>
+      for (const e of entities) {
+        const t = e.tier ?? 'P1'
+        tiers[t] = (tiers[t] ?? 0) + 1
+      }
+    }
+
+    return { ...summary, tiers }
+  })
+
+  ipcMain.handle('admin:piiAuditDetail', (_e, companyId: string) => {
+    const db = getDb()
+    const rows = db.prepare(`
+      SELECT
+        pal.id, pal.message_id, pal.routed_to, pal.detected_at,
+        pal.pii_entities_found, pal.pii_sent_to_cloud,
+        m.conversation_id,
+        u.name as user_name,
+        d.name as dept_name
+      FROM pii_audit_log pal
+      JOIN departments d ON pal.department_id = d.id
+      JOIN users u ON pal.user_id = u.id
+      JOIN messages m ON pal.message_id = m.id
+      WHERE d.company_id = ? AND json_array_length(pal.pii_entities_found) > 0
+      ORDER BY pal.detected_at DESC
+      LIMIT 200
+    `).all(companyId) as Array<{
+      id: string; message_id: string; routed_to: string; detected_at: string
+      pii_entities_found: string; pii_sent_to_cloud: number
+      conversation_id: string; user_name: string; dept_name: string
+    }>
+
+    return rows.map((r) => ({
+      ...r,
+      entities: JSON.parse(r.pii_entities_found) as Array<{ type: string; tier: string; original: string; placeholder: string }>,
+    }))
   })
 
   ipcMain.handle('admin:costComparison', (_e, companyId: string) => {
