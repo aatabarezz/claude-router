@@ -4,7 +4,8 @@ import { randomUUID } from 'crypto'
 import { getDb } from '../db'
 import { scorePromptLocal } from '../engines/scorer'
 import { routePromptRules, MODEL_IDS, isLocalModel } from '../engines/router'
-import { maskPii, restorePii, hashMapping } from '../engines/pii'
+import { maskAndVault } from '../engines/masking-pipeline'
+import { restoreWithPermissions } from '../engines/re-injection-controller'
 import type { SendMessagePayload, MessageResponse, ScorePayload } from '../../shared/types'
 
 const SYSTEM_PROMPT = `You are a helpful AI assistant running inside Claude Router, a private enterprise desktop app.
@@ -105,15 +106,19 @@ export function registerChatHandlers(): void {
       assistantContent = ollamaJson.response ?? '(no response from local model)'
     } else {
       // Cloud path — mask PII in current message
-      const { maskedText, entities, mapping } = maskPii(payload.content)
-      const piiMappingHash = hashMapping(mapping)
+      const maskingResult = await maskAndVault(payload.content, {
+        message_id: userMsgId,
+        user_id: payload.userId,
+        department_id: payload.departmentId,
+        target_llm: `anthropic:${routing.model}`,
+      })
 
       const apiMessages: Array<Anthropic.MessageParam> = [
         ...history.map((m) => ({
           role: m.role as 'user' | 'assistant',
           content: m.content,
         })),
-        { role: 'user' as const, content: maskedText },
+        { role: 'user' as const, content: maskingResult.masked_text },
       ]
 
       const client = new Anthropic({ apiKey: payload.apiKey })
@@ -173,16 +178,18 @@ export function registerChatHandlers(): void {
       // Extract final text
       const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text')
       const rawContent = textBlock?.text ?? ''
-      assistantContent = restorePii(rawContent, mapping)
+
+      // Restore PII with permission control
+      const reinjectionResult = await restoreWithPermissions(rawContent, {
+        message_id: userMsgId,
+        user_id: payload.userId,
+        department_id: payload.departmentId,
+        target_llm: `anthropic:${routing.model}`,
+      })
+      assistantContent = reinjectionResult.restored_text
 
       const p = PRICING[modelId] ?? { in: 0.000003, out: 0.000015 }
       costUsd = tokensIn * p.in + tokensOut * p.out
-
-      // PII audit log
-      db.prepare(
-        'INSERT INTO pii_audit_log (id, message_id, user_id, department_id, routed_to, pii_entities_found, pii_sent_to_cloud, pii_mapping_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-      ).run(randomUUID(), userMsgId, payload.userId, payload.departmentId,
-        routing.model, JSON.stringify(entities), 0, piiMappingHash)
     }
 
     const assistantMsgId = randomUUID()

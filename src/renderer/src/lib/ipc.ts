@@ -42,4 +42,11 @@ export const api = {
   clarify: (prompt: string, apiKey: string) => ipc.invoke('chat:clarify', { prompt, apiKey }),
   exportComplianceReport: (companyId: string) => ipc.invoke('export:complianceReport', companyId),
   getPiiAuditDetail: (companyId: string) => ipc.invoke('admin:piiAuditDetail', companyId),
+
+  // Audit trail
+  getLatestMessageAudit: (userId: string, deptId: string) =>
+    ipc.invoke('audit:latest-message-audit', { user_id: userId, department_id: deptId }),
+  getMessageAuditTrail: (messageId: string) =>
+    ipc.invoke('audit:message-audit-trail', { message_id: messageId }),
+  getAuditTimeline: (options: any) => ipc.invoke('audit:timeline', options),
 }

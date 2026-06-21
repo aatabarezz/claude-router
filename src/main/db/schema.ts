@@ -70,4 +70,60 @@ export const SCHEMA = `
     key TEXT NOT NULL,
     value TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS pii_vault (
+    id TEXT PRIMARY KEY,
+    token TEXT NOT NULL UNIQUE,
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    department_id TEXT NOT NULL REFERENCES departments(id),
+    pii_type TEXT NOT NULL,
+    pii_hash TEXT NOT NULL,
+    original_encrypted TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 0.95,
+    detector_used TEXT NOT NULL,
+    detected_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    ttl_expires_at TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_pii_vault_token ON pii_vault(token);
+  CREATE INDEX IF NOT EXISTS idx_pii_vault_message ON pii_vault(message_id);
+  CREATE INDEX IF NOT EXISTS idx_pii_vault_user ON pii_vault(user_id);
+  CREATE INDEX IF NOT EXISTS idx_pii_vault_type ON pii_vault(pii_type);
+
+  CREATE TABLE IF NOT EXISTS pii_injection_policy (
+    id TEXT PRIMARY KEY,
+    department_id TEXT NOT NULL UNIQUE REFERENCES departments(id),
+    allowed_roles TEXT NOT NULL DEFAULT '["admin"]',
+    allowed_pii_types TEXT NOT NULL DEFAULT '["email","phone","person","address"]',
+    allowed_operations TEXT NOT NULL DEFAULT '["restore_after_api"]',
+    allowed_llm_targets TEXT NOT NULL DEFAULT '["anthropic:*","openai:*"]',
+    exclude_pii_types TEXT NOT NULL DEFAULT '["secret"]',
+    require_explicit_consent INTEGER NOT NULL DEFAULT 1,
+    max_retention_days INTEGER NOT NULL DEFAULT 30,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS pii_audit_log_v2 (
+    id TEXT PRIMARY KEY,
+    message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    department_id TEXT NOT NULL REFERENCES departments(id),
+    event_type TEXT NOT NULL,
+    pii_type TEXT,
+    token TEXT,
+    detector_used TEXT,
+    operation TEXT,
+    target_llm TEXT,
+    event_data TEXT,
+    timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+    actor TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_pii_audit_log_v2_event_type ON pii_audit_log_v2(event_type);
+  CREATE INDEX IF NOT EXISTS idx_pii_audit_log_v2_user ON pii_audit_log_v2(user_id);
+  CREATE INDEX IF NOT EXISTS idx_pii_audit_log_v2_timestamp ON pii_audit_log_v2(timestamp DESC);
 `;

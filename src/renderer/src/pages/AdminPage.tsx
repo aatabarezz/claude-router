@@ -6,6 +6,7 @@ interface CostComparison { opusOnly: number; sonnetOnly: number; sonnetOpus: num
 interface PiiStats {
   total_scanned: number
   pii_detected: number
+  pii_masked: number
   sent_to_cloud: number
   tiers: { P0: number; P1: number; P2: number; P3: number }
 }
@@ -58,8 +59,12 @@ export function AdminPage() {
   const [auditRows, setAuditRows] = useState<AuditRow[]>([])
   const [showAudit, setShowAudit] = useState(false)
   const [auditTierFilter, setAuditTierFilter] = useState<string>('ALL')
+  const [latestAudit, setLatestAudit] = useState<any>(null)
+  const [showLatestAudit, setShowLatestAudit] = useState(false)
 
   const companyId = localStorage.getItem(SEED_COMPANY_KEY) ?? ''
+  const userId = localStorage.getItem('claude-router-seed-user-id') ?? ''
+  const deptId = localStorage.getItem('claude-router-seed-dept-id') ?? ''
 
   useEffect(() => {
     if (!companyId) return
@@ -79,6 +84,20 @@ export function AdminPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Company AI Dashboard</h1>
         <div className="flex gap-2 items-center">
+          <button
+            onClick={() => {
+              void Promise.all([
+                api.getAdminOverview(companyId, period).then((r) => setOverview(r as Overview)),
+                api.getCostComparison(companyId).then((r) => setCost(r as CostComparison)),
+                api.getAdminPiiStats(companyId).then((r) => setPii(r as PiiStats)),
+                api.getDeptBreakdown(companyId).then((r) => setDepts(r as DeptRow[])),
+              ])
+            }}
+            className="text-sm border border-border rounded px-3 py-1 hover:bg-muted"
+            title="Refresh all statistics"
+          >
+            ↻ Refresh
+          </button>
           <select
             value={period}
             onChange={(e) => setPeriod(e.target.value)}
@@ -106,6 +125,88 @@ export function AdminPage() {
         <KpiCard label="Total Prompts" value={String(stats?.total ?? '—')} />
         <KpiCard label="Avg Quality" value={stats?.avg_score != null ? `${fmt(stats.avg_score, 0)}/100` : '—'} />
       </div>
+
+      {/* Latest Message Audit Viewer */}
+      {showLatestAudit && latestAudit && (
+        <div className="border border-blue-500/30 bg-blue-500/5 rounded-lg p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-blue-400">Latest Message Audit Trail</h2>
+            <button
+              onClick={() => setShowLatestAudit(false)}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              ✕ Close
+            </button>
+          </div>
+          {latestAudit.error ? (
+            <p className="text-sm text-muted-foreground">{latestAudit.error}</p>
+          ) : (
+            <div className="space-y-4">
+              {/* Original text */}
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">ORIGINAL MESSAGE</p>
+                <div className="bg-background rounded p-3 text-sm border border-border">
+                  <p className="whitespace-pre-wrap">{latestAudit.original_text}</p>
+                </div>
+              </div>
+
+              {/* Detected PII */}
+              {latestAudit.detected_pii.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-muted-foreground">DETECTED PII ({latestAudit.detected_pii.length})</p>
+                  <div className="flex flex-wrap gap-2">
+                    {latestAudit.detected_pii.map((pii: any) => (
+                      <span key={pii.token} className="text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded px-2 py-1">
+                        {pii.type}: <code className="font-mono">{pii.token}</code>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Masked text */}
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">MASKED (SENT TO API)</p>
+                <div className="bg-background rounded p-3 text-sm border border-green-500/30">
+                  <p className="whitespace-pre-wrap font-mono text-green-400">{latestAudit.masked_text}</p>
+                </div>
+              </div>
+
+              {/* Audit timeline */}
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">AUDIT TIMELINE</p>
+                <div className="space-y-1 text-xs">
+                  {latestAudit.audit_events.map((event: any, idx: number) => (
+                    <div key={idx} className="flex items-center gap-2 text-muted-foreground">
+                      <span className="text-xs">{new Date(event.timestamp).toLocaleTimeString()}</span>
+                      <span className="text-primary">{event.event_type}</span>
+                      {event.pii_type && <span className="text-amber-400">{event.pii_type}</span>}
+                      {event.target_llm && <span className="text-blue-400">{event.target_llm}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="text-xs text-muted-foreground border-t border-border pt-2">
+                <p>Message ID: <code className="font-mono text-foreground">{latestAudit.message_id}</code></p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* View Latest Button */}
+      <button
+        onClick={() => {
+          void api.getLatestMessageAudit(userId, deptId).then((r: any) => {
+            setLatestAudit(r)
+            setShowLatestAudit(true)
+          })
+        }}
+        className="w-full py-2 px-4 bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded-lg hover:bg-blue-500/30 transition-colors text-sm font-medium"
+      >
+        View Latest Message Audit Trail
+      </button>
 
       {/* Cost Intelligence */}
       <div className="border border-border rounded-lg p-4 space-y-3">
@@ -243,7 +344,7 @@ export function AdminPage() {
         </div>
 
         {/* Summary row */}
-        <div className="grid grid-cols-3 gap-4 text-sm pb-3 border-b border-border">
+        <div className="grid grid-cols-4 gap-4 text-sm pb-3 border-b border-border">
           <div>
             <div className="text-muted-foreground text-xs">Messages Scanned</div>
             <div className="text-xl font-semibold">{pii?.total_scanned ?? '—'}</div>
@@ -251,6 +352,10 @@ export function AdminPage() {
           <div>
             <div className="text-muted-foreground text-xs">PII Detected</div>
             <div className="text-xl font-semibold">{pii?.pii_detected ?? '—'}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground text-xs">PII Masked</div>
+            <div className="text-xl font-semibold text-green-400">{pii?.pii_masked ?? '—'}</div>
           </div>
           <div>
             <div className="text-muted-foreground text-xs">Raw PII to Cloud</div>

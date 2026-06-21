@@ -1,6 +1,10 @@
-import { app, shell, BrowserWindow } from 'electron'
+import dotenv from 'dotenv'
 import { join } from 'path'
+import { app, shell, BrowserWindow } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+
+// Load .env file from project root
+dotenv.config({ path: join(__dirname, '../../.env') })
 import { getDb } from './db'
 import { seedIfEmpty } from './db/seed'
 import { registerChatHandlers } from './ipc/chat'
@@ -9,6 +13,7 @@ import { registerSettingsHandlers } from './ipc/settings'
 import { registerAdminHandlers } from './ipc/admin'
 import { registerStatsHandlers } from './ipc/stats'
 import { registerExportHandlers } from './ipc/export'
+import { registerAuditHandlers } from './ipc/audit'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -47,6 +52,7 @@ app.whenReady().then(() => {
   registerAdminHandlers()
   registerStatsHandlers()
   registerExportHandlers()
+  registerAuditHandlers()
   electronApp.setAppUserModelId('com.claude-router')
 
   app.on('browser-window-created', (_, window) => {

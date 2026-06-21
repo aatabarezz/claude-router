@@ -30,8 +30,15 @@ export function MessageBubble({ message }: { message: Message }) {
           via {message.model_used} · {message.routing_reason}
         </span>
       )}
-      {isUser && message.local_quality_score !== undefined && (
-        <span className="text-xs text-muted-foreground px-2">score: {message.local_quality_score}/100</span>
+      {isUser && (
+        <div className="flex flex-col gap-1 items-end px-2">
+          {message.local_quality_score !== undefined && (
+            <span className="text-xs text-muted-foreground">score: {message.local_quality_score}/100</span>
+          )}
+          <span className="text-xs text-muted-foreground italic cursor-pointer hover:text-foreground" title="Click to copy message ID">
+            {message.id}
+          </span>
+        </div>
       )}
     </div>
   )

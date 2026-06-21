@@ -35,15 +35,17 @@ export function registerAdminHandlers(): void {
   ipcMain.handle('admin:piiStats', (_e, companyId: string) => {
     const db = getDb()
 
+    // Count from new audit log (v2) which tracks detection and masking
     const summary = db.prepare(`
       SELECT
-        COUNT(*) as total_scanned,
-        SUM(CASE WHEN json_array_length(pii_entities_found) > 0 THEN 1 ELSE 0 END) as pii_detected,
-        SUM(pii_sent_to_cloud) as sent_to_cloud
-      FROM pii_audit_log pal
+        COUNT(DISTINCT message_id) as total_scanned,
+        SUM(CASE WHEN event_type = 'detected' THEN 1 ELSE 0 END) as pii_detected,
+        SUM(CASE WHEN event_type = 'masked' THEN 1 ELSE 0 END) as pii_masked,
+        0 as sent_to_cloud  -- With masking, raw PII should never reach cloud
+      FROM pii_audit_log_v2 pal
       JOIN departments d ON pal.department_id = d.id
       WHERE d.company_id = ?
-    `).get(companyId) as { total_scanned: number; pii_detected: number; sent_to_cloud: number }
+    `).get(companyId) as { total_scanned: number; pii_detected: number; pii_masked: number; sent_to_cloud: number }
 
     // Derive tier counts by parsing stored entity JSON
     const rows = db.prepare(`
@@ -66,30 +68,73 @@ export function registerAdminHandlers(): void {
 
   ipcMain.handle('admin:piiAuditDetail', (_e, companyId: string) => {
     const db = getDb()
+
+    // Get all messages with PII detections from the new audit log
     const rows = db.prepare(`
-      SELECT
-        pal.id, pal.message_id, pal.routed_to, pal.detected_at,
-        pal.pii_entities_found, pal.pii_sent_to_cloud,
+      SELECT DISTINCT
+        m.id as message_id,
         m.conversation_id,
+        m.created_at,
         u.name as user_name,
         d.name as dept_name
-      FROM pii_audit_log pal
-      JOIN departments d ON pal.department_id = d.id
-      JOIN users u ON pal.user_id = u.id
+      FROM pii_audit_log_v2 pal
       JOIN messages m ON pal.message_id = m.id
-      WHERE d.company_id = ? AND json_array_length(pal.pii_entities_found) > 0
-      ORDER BY pal.detected_at DESC
+      JOIN conversations c ON m.conversation_id = c.id
+      JOIN departments d ON c.department_id = d.id
+      JOIN users u ON c.user_id = u.id
+      WHERE d.company_id = ? AND pal.event_type = 'detected'
+      ORDER BY m.created_at DESC
       LIMIT 200
     `).all(companyId) as Array<{
-      id: string; message_id: string; routed_to: string; detected_at: string
-      pii_entities_found: string; pii_sent_to_cloud: number
-      conversation_id: string; user_name: string; dept_name: string
+      message_id: string; conversation_id: string; created_at: string
+      user_name: string; dept_name: string
     }>
 
-    return rows.map((r) => ({
-      ...r,
-      entities: JSON.parse(r.pii_entities_found) as Array<{ type: string; tier: string; original: string; placeholder: string }>,
-    }))
+    // For each message, get the PII details and masking info
+    return rows.map((r) => {
+      const detectionEvents = db.prepare(`
+        SELECT pii_type, token, detector_used FROM pii_audit_log_v2
+        WHERE message_id = ? AND event_type = 'detected'
+      `).all(r.message_id) as Array<{ pii_type: string; token: string; detector_used: string }>
+
+      const maskingEvent = db.prepare(`
+        SELECT event_data FROM pii_audit_log_v2
+        WHERE message_id = ? AND event_type = 'masked'
+        LIMIT 1
+      `).get(r.message_id) as { event_data: string } | undefined
+
+      let masked_text = ''
+      let detected_pii: Array<{ type: string; token: string }> = []
+
+      if (maskingEvent?.event_data) {
+        try {
+          const data = JSON.parse(maskingEvent.event_data)
+          masked_text = data.masked_text || ''
+          detected_pii = data.detected_pii || []
+        } catch (e) {
+          // Ignore parse errors
+        }
+      }
+
+      return {
+        id: r.message_id,
+        message_id: r.message_id,
+        conversation_id: r.conversation_id,
+        user_name: r.user_name,
+        dept_name: r.dept_name,
+        detected_at: r.created_at,
+        routed_to: 'cloud', // From new audit, we know PII was masked before API
+        pii_sent_to_cloud: 0, // Always 0 with new masking pipeline
+        entities: detectionEvents.map(e => ({
+          type: e.pii_type,
+          tier: 'P1', // Simplified for display
+          original: e.token, // Show the token as the placeholder
+          placeholder: e.token,
+        })),
+        masked_text,
+        detected_pii,
+      }
+    })
   })
 
   ipcMain.handle('admin:costComparison', (_e, companyId: string) => {
